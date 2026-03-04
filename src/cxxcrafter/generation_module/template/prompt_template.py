@@ -1,34 +1,44 @@
 from .dockerfile_template import dockerfile_template
 
 
-
-
-
 def get_initial_prompt(project_name, user_intention, environment_requirement, dependency, docs):
     """
-    Get the initial prompt.
+    [Baseline 改写] 注入 OSS-Fuzz 元数据，并将任务定义为修复现有配置
     """
-    if len(dependency) > 10:
-        potential_dependency = {k: dependency[k] for k in list(dependency)[:10]}
-    else:
-        potential_dependency = dependency
+    # 从 user_intention (即 project_info) 提取信息
+    p_info = user_intention
+    base_image = p_info.get('base_image_digest', '')
+    sanitizer = p_info.get('sanitizer', 'address')
+    engine = p_info.get('engine', 'libfuzzer')
+    
+    # 获取原始报错日志的片段（如果可用）
+    error_log_url = p_info.get('fuzzing_build_error_log', 'N/A')
 
     prompt_template = f"""
-        Please generate dockerfile which build the project {project_name} from source code accordind to the dockerfile template {dockerfile_template}.
-        The source code is located at {"./"+project_name}. Move it to the docker container temp directory and build.
-        Requirements:
-            1. Install commands must be executed one at a time.
-            2. Avoid repeating identical RUN commands.
-            3. Please adhere to Dockerfile syntax. For example, ensure that comments and commands are on separate lines. Comments should start with a # and be placed independently of commands.
-        {user_intention}
-        Some useful information:
-            Environment requirement: {environment_requirement}
-            Docs: {docs}
-            Potential Dependencies (skip installation if useless): {potential_dependency}
+        You are a build engineering specialist. Your goal is to FIX the OSS-Fuzz build configuration for the project '{project_name}'.
+        
+        ENVIRONMENT CONSTRAINTS (MANDATORY):
+        1. Base Image: You MUST use 'FROM gcr.io/oss-fuzz-base/base-builder@sha256:{base_image}'
+        2. Build Target: Engine={engine}, Sanitizer={sanitizer}, Architecture={p_info.get('architecture')}
+        
+        TASK:
+        Instead of creating a new project, you must FIX the existing Dockerfile and build.sh scripts to resolve the current build error.
+        
+        INPUT CONTEXT:
+        - Build System: {environment_requirement}
+        - Static Dependencies Found: {dependency}
+        - Original Error Log Reference: {error_log_url}
+        - Existing project documentation and hints: {docs}
+
+        INSTRUCTIONS:
+        1. Propose a complete Dockerfile that solves library missing issues or toolchain conflicts.
+        2. Use the standard OSS-Fuzz project structure.
+        3. If specific library versions are needed for {sanitizer}, ensure they are installed correctly.
+        
+        Follow this Dockerfile template structure:
+        {dockerfile_template}
     """
     return prompt_template
-
-
 
 
 prompt_template_for_modification = """

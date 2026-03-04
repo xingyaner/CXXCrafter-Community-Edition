@@ -1,88 +1,64 @@
-import logging, shutil, os
-from .template.prompt_template import get_initial_prompt, prompt_template_for_modification
-from .utils import save_dockerfile, resave_dockerfile, extract_dockerfile_content
+import os
+import logging
+from .utils import save_dockerfile, extract_dockerfile_content
+from .template.prompt_template import get_initial_prompt
 from cxxcrafter.llm.bot import GPTBot
-from cxxcrafter.init import get_playground_dir
-
 
 class DockerfileGenerator:
-    def __init__(self, project_name, project_path, environment_requirement, dependency, docs):
+    def __init__(self, project_name, project_path, environment_requirement, dependency, docs, project_info=None):
         self.project_name = project_name
         self.project_path = project_path
         self.environment_requirement = environment_requirement
         self.dependency = dependency
         self.docs = docs
+        self.project_info = project_info
         self.logger = logging.getLogger(__name__)
-        self.logger.disabled = False
-    
-    def generate_system_prompt(self):
-        self.logger.info('Generating system prompt...')
-        return get_initial_prompt(self.project_name, self.project_path, self.environment_requirement, self.dependency, self.docs)
 
-    def perform_inference(self, system_prompt):
-        self.logger.info('Performing inference...')
-        bot = GPTBot(system_prompt)
-        return bot.inference()
-
-    def extract_dockerfile(self, response):
-        self.logger.info('Extracting Dockerfile content...')
-        return extract_dockerfile_content(response)
-
-    def check_dockerfile(self, dockerfile_content):
-        prompt = """
-        Please review the Dockerfile to ensure it meets the following requirements. If it doesn't, make the necessary modifications:
-        1. Each install command should be executed individually.
-        2. Avoid duplicating identical RUN commands.
-        3. Follow proper Dockerfile syntax, such as placing comments and commands on separate lines. Comments should begin with a # and be on their own line.
-        """
-        bot = GPTBot(prompt)
-        dockerfile_content = self.extract_dockerfile(bot.inference(dockerfile_content))
-        return dockerfile_content
-    
     def generate_dockerfile(self):
-        self.logger.info('Starting Dockerfile generation process...')
-        system_prompt = self.generate_system_prompt()
-        response = self.perform_inference(system_prompt)
-        dockerfile_content = self.extract_dockerfile(response)
-        dockerfile_content = self.check_dockerfile(dockerfile_content)
-
-        # Create dockerfile playground directory
-        project_dir = os.path.join(get_playground_dir(), self.project_name)
-
-        save_dockerfile(project_dir, dockerfile_content)
-        self.logger.info('Starting Copying the Repo to Dockerfile_Playground')
-        temp = os.path.join(project_dir, self.project_name)
-
+        self.logger.info("Generating initial Dockerfile...")
+        user_intention_data = self.project_info if self.project_info else {}
+        prompt_text = get_initial_prompt(
+            self.project_name, 
+            user_intention_data, 
+            self.environment_requirement, 
+            self.dependency, 
+            self.docs
+        )
+        bot = GPTBot(system_prompt="You are a premier expert in C/C++ building.")
+        response = bot.inference(str(prompt_text))
         try:
-            if not os.path.exists(temp):
-                shutil.copytree(self.project_path, temp)
+            dockerfile_content = extract_dockerfile_content(response)
+            from cxxcrafter.init import get_playground_dir
+            save_path = os.path.join(get_playground_dir(), self.project_name)
+            os.makedirs(save_path, exist_ok=True)
+            save_dockerfile(save_path, dockerfile_content)
         except Exception as e:
-            self.logger.error(
-                f"Error copying the repo: {e}. Params: self.project_path: {self.project_path}; temp: {temp}")
+            self.logger.error(f"Failed to extract/save initial Dockerfile: {e}")
             raise e
-
-        self.logger.info('Finish Copying')
-        self.logger.info('Finish generating the initial dockerfile')
-    
 
 class DockerfileModifier:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.logger.info('Begin to modify the dockerfile')
-        self.bot = GPTBot(prompt_template_for_modification)
+        self.bot = GPTBot(system_prompt="You are an expert at debugging build errors.")
 
-    def generate_prompt(self, dockerfile_path, error_message):
-        dockerfile_content = open(dockerfile_path, "r").read()
-        return dockerfile_content
-
-    
     def modify_dockerfile(self, dockerfile_path, error_message):
-        """
-        """
-        dockerfile_content = self.generate_prompt(dockerfile_path, error_message)
-        response = self.bot.inference(dockerfile_content +"\n*2" +error_message)
-        if '```dockerfile' in response.lower():
-            dockerfile_content = extract_dockerfile_content(response)
-            resave_dockerfile(dockerfile_path, dockerfile_content)
+        from .template.prompt_template import prompt_template_for_modification
+        from .utils import resave_dockerfile, extract_dockerfile_content
         
-    
+        self.logger.info("Modifying Dockerfile based on build feedback...")
+        with open(dockerfile_path, 'r', encoding='utf-8') as f:
+            last_content = f.read()
+            
+        prompt = prompt_template_for_modification.format(
+            last_dockerfile_content=last_content,
+            feedback_message=error_message
+        )
+        
+        response = self.bot.inference(str(prompt))
+        
+        try:
+            new_content = extract_dockerfile_content(response)
+            resave_dockerfile(dockerfile_path, new_content)
+        except Exception as e:
+            self.logger.error(f"Modifier extraction failed (LLM did not provide Dockerfile): {e}")
+            # 这里的失败会让主循环进入下一轮，不抛出异常

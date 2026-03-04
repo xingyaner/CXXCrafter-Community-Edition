@@ -44,7 +44,10 @@ def token_count_decorator(func):
 
 class GPTBot:
     def __init__(self, system_prompt=None):
-        self.messages = [{"role": "system", "content": system_prompt}]
+        # 核心修复：如果 system_prompt 为 None，强制转换为空字符串或默认提示词
+        content = system_prompt if system_prompt is not None else "You are a helpful assistant."
+        self.messages = [{"role": "system", "content": content}]
+        
         if LLM_BASE_URL:
             self.client = openai.OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
         else:

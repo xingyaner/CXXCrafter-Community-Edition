@@ -1,9 +1,9 @@
 import os
 
 # === Config ===
-CONFIG_LLM_MODEL = ""
+CONFIG_LLM_MODEL = "deepseek-coder"
 CONFIG_API_KEY = ""
-CONFIG_BASE_URL = ""
+CONFIG_BASE_URL = "https://api.deepseek.com/v1"
 
 MP_POOL_SIZE = 10
 
