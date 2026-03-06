@@ -1,5 +1,6 @@
 import os
 import logging
+import time # 新增：用于计时
 from datetime import datetime
 from cxxcrafter.log_utils import setup_logging, log_the_dockerfile, log_the_error_message
 from cxxcrafter.generation_module import DockerfileGenerator, DockerfileModifier
@@ -17,17 +18,59 @@ class CXXCrafter:
         self.project_path = project_path
         self.project_info = project_info
         self.oss_fuzz_root_path = oss_fuzz_root_path
-        self.start_time = datetime.now().strftime('%Y%m%d_%H%M')
+        
+        # --- 统计初始化 ---
+        self.start_wall_time = time.time()
+        self.start_in_tokens, self.start_out_tokens = get_sdk_token_counts()
+        
+        self.start_time_str = datetime.now().strftime('%Y%m%d_%H%M')
         self.project_name = os.path.basename(project_path)
         self.dockerfile_path = os.path.join(get_playground_dir(), self.project_name, 'Dockerfile')
-        self.log_file = f"{get_log_dir()}/{self.project_name}_{self.start_time}.log"
+        self.log_file = f"{get_log_dir()}/{self.project_name}_{self.start_time_str}.log"
         self.history_dir = None
-        self.flag_version = 1
+        self.flag_version = 0 # 修复轮数计数
         self.modifier = DockerfileModifier()
 
         setup_logging(self.log_file, self.project_name)
         self.logger = logging.getLogger(__name__)
         self.logger.disabled = False
+
+    def _calculate_lines_modified(self):
+        """统计最终生成的 Dockerfile 行数作为修改行数"""
+        if os.path.exists(self.dockerfile_path):
+            try:
+                with open(self.dockerfile_path, 'r', encoding='utf-8') as f:
+                    return len(f.readlines())
+            except Exception:
+                return 0
+        return 0
+
+    def print_final_report(self, is_success):
+        """按照特定格式输出最终 Baseline 报告"""
+        end_time = time.time()
+        end_in_tokens, end_out_tokens = get_sdk_token_counts()
+        
+        duration_min = (end_time - self.start_wall_time) / 60
+        total_tokens = (end_in_tokens - self.start_in_tokens) + (end_out_tokens - self.start_out_tokens)
+        lines_modified = self._calculate_lines_modified()
+        
+        result_icon = "✅ SUCCESS" if is_success else "❌ FAILURE"
+        
+        report = (
+            f"\n{'='*60}\n"
+            f"🏁 FINAL BASELINE REPORT: {self.project_name}\n"
+            f"[RESULT]           {result_icon}\n"
+            f"[DISCUSSION]       NO\n"
+            f"[REPAIR ROUNDS]    {self.flag_version}\n"
+            f"[TOKEN USAGE]      {total_tokens}\n"
+            f"[FILES MODIFIED]   {1 if lines_modified > 0 else 0}\n"
+            f"[LINES MODIFIED]   {lines_modified}\n"
+            f"[TIME COST]        {duration_min:.2f} minutes\n"
+            f"{'='*60}\n"
+        )
+        # 同时输出到终端和日志文件
+        print(report)
+        self.logger.info(report)
 
     def parse_project(self):
         self.logger.info('Parsing Module Starts')
@@ -38,6 +81,8 @@ class CXXCrafter:
 
     def generate_dockerfile(self):
         self.logger.info('Generation Module Starts')
+        # 第一次生成计为第 1 轮
+        self.flag_version += 1
         dockerfile_generator = DockerfileGenerator(
             self.project_name, self.project_path, 
             self.environment_requirement, self.potential_dependency, 
@@ -46,25 +91,20 @@ class CXXCrafter:
         dockerfile_generator.generate_dockerfile()
         self.logger.info('Generation Module Finishes')
 
-        self.history_dir = os.path.join(os.path.dirname(self.dockerfile_path), f'history-{self.start_time}')
+        self.history_dir = os.path.join(os.path.dirname(self.dockerfile_path), f'history-{self.start_time_str}')
         os.makedirs(self.history_dir, exist_ok=True)
         log_the_dockerfile(self.dockerfile_path, self.flag_version, self.history_dir)
     
     def modify_dockerfile(self, error_message):
         self.logger.info('Modifier Module Starts')
-        # 调用时确保传递的是真正的错误日志内容
+        # 每次修改计为新的一轮
+        self.flag_version += 1
         self.modifier.modify_dockerfile(self.dockerfile_path, error_message)
         self.logger.info('Modifier Module Finishes')
-        self.flag_version += 1
         log_the_dockerfile(self.dockerfile_path, self.flag_version, self.history_dir)
 
     def execute_dockerfile(self):
-        """
-        [Baseline 改写] 修复日志传递逻辑
-        """
-        self.logger.info('--- [Baseline] Execution via run_fuzz_build_streaming ---')
-        
-        # 1. 执行构建
+        self.logger.info(f'--- [Baseline Round {self.flag_version}] Execution ---')
         run_fuzz_build_streaming(
             project_name=self.project_name,
             oss_fuzz_path=self.oss_fuzz_root_path,
@@ -74,12 +114,9 @@ class CXXCrafter:
             mount_path=None 
         )
         
-        # 2. 【核心修复】显式从日志文件读取内容
-        # 否则 Baseline 不知道 ./autogen.sh 不存在
         log_res = read_file_content('fuzz_build_log_file/fuzz_build_log.txt', tail_lines=200)
         real_log_content = log_res.get('content', 'No log content available.')
         
-        # 3. 使用判别器分析真实日志
         flag, error = build_success_check_2(
             os.path.dirname(self.dockerfile_path), 
             real_log_content, 
@@ -88,16 +125,26 @@ class CXXCrafter:
         return flag, error
 
     def run(self):
-        self.parse_project()
-        self.generate_dockerfile()
-        while True:
-            flag_success, error_message = self.execute_dockerfile()
-            if not flag_success:
-                self.logger.error(f"Execution failed: {error_message}")
-                log_the_error_message(error_message, self.flag_version, self.history_dir)
-                if self.flag_version >= 10:
-                    return self.project_name, False
-                self.modify_dockerfile(error_message)
-            else:
-                save_successful_dockerfile(self.dockerfile_path, self.project_name, get_solution_base_dir())
-                return self.project_name, True
+        try:
+            self.parse_project()
+            self.generate_dockerfile()
+            while True:
+                flag_success, error_message = self.execute_dockerfile()
+                if not flag_success:
+                    self.logger.error(f"Execution failed: {error_message}")
+                    log_the_error_message(error_message, self.flag_version, self.history_dir)
+                    
+                    # 达到 10 次上限，打印报告并退出
+                    if self.flag_version >= 10:
+                        self.print_final_report(False)
+                        return self.project_name, False
+                    
+                    self.modify_dockerfile(error_message)
+                else:
+                    save_successful_dockerfile(self.dockerfile_path, self.project_name, get_solution_base_dir())
+                    self.print_final_report(True)
+                    return self.project_name, True
+        except Exception as e:
+            self.logger.critical(f"Unexpected error in run loop: {e}")
+            self.print_final_report(False)
+            raise e
