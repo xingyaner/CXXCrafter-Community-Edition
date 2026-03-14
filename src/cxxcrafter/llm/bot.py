@@ -1,14 +1,10 @@
 import openai
 import tiktoken
-
-try:
-    from cxxcrafter.config import LLM_MODEL, LLM_API_KEY, LLM_BASE_URL
-except Exception as e:
-    raise e
+import logging
+from src.cxxcrafter.config import LLM_MODEL, LLM_API_KEY, LLM_BASE_URL
 
 global_input_token_count = 0
 global_output_token_count = 0
-
 sdk_global_input_token_count = 0
 sdk_global_output_token_count = 0
 
@@ -21,22 +17,15 @@ def get_sdk_token_counts():
 def token_count_decorator(func):
     def wrapper(self, *args, **kwargs):
         global global_input_token_count, global_output_token_count
-
         message = kwargs.get('message', args[0] if args else '')
-
-        # 统计输入token数量
         input_tokens = self.calculate_message_length(message)
         global_input_token_count += input_tokens
         self.input_token_count += input_tokens
-
-        # 调用被装饰的函数并获取返回值
         result = func(self, *args, **kwargs)
-
-        # 统计输出token数量
+        # 注意：推理模式下返回值是最终 content，SDK 统计会包含思维链 token
         output_tokens = self.calculate_message_length(result)
         global_output_token_count += output_tokens
         self.output_token_count += output_tokens
-
         return result
 
     return wrapper
@@ -44,61 +33,95 @@ def token_count_decorator(func):
 
 class GPTBot:
     def __init__(self, system_prompt=None):
-        # 核心修复：如果 system_prompt 为 None，强制转换为空字符串或默认提示词
-        content = system_prompt if system_prompt is not None else "You are a helpful assistant."
+        content = system_prompt if system_prompt is not None else "You are a premier expert in software building."
         self.messages = [{"role": "system", "content": content}]
-        
-        if LLM_BASE_URL:
-            self.client = openai.OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
-        else:
-            self.client = openai.OpenAI(api_key=LLM_API_KEY)
+        self.client = openai.OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
         self.model = LLM_MODEL
+        self.logger = logging.getLogger(__name__)
         self.input_token_count = 0
         self.output_token_count = 0
+        self.last_reasoning = ""  # 记录最近一次思维链内容
+
+    def _clear_history_reasoning(self):
+        """
+        按照官方文档要求：在下一轮对话开始时，清理历史 assistant 消息中的 reasoning_content
+        """
+        for msg in self.messages:
+            if msg.get("role") == "assistant" and "reasoning_content" in msg:
+                del msg["reasoning_content"]
 
     @token_count_decorator
     def inference(self, message=''):
+        self._clear_history_reasoning()
         self.messages.append({"role": "user", "content": message})
+
+        # 调用 API (推理模式下自动处理 reasoning_content)
         response = self.client.chat.completions.create(
             model=self.model,
             messages=self.messages
         )
-        content = response.choices[0].message.content
-        global sdk_global_input_token_count
+
+        msg_obj = response.choices[0].message
+        self.last_reasoning = getattr(msg_obj, 'reasoning_content', "")
+        content = msg_obj.content
+
+        # 记录 SDK Token 使用
+        global sdk_global_input_token_count, sdk_global_output_token_count
         sdk_global_input_token_count += response.usage.prompt_tokens
-        global sdk_global_output_token_count
         sdk_global_output_token_count += response.usage.completion_tokens
-        self.messages.append({"role": "assistant", "content": content})
+
+        # 存入历史（当前轮次保留 reasoning 以备可能的 log 需要）
+        self.messages.append({
+            "role": "assistant",
+            "content": content,
+            "reasoning_content": self.last_reasoning
+        })
+
+        if self.last_reasoning:
+            self.logger.info(f"--- [REASONER THOUGHTS] ---\n{self.last_reasoning[:500]}...\n")
+
         return content
 
     @token_count_decorator
     def inference2(self, context=128000, message=''):
+        self._clear_history_reasoning()
         self.messages.append({"role": "user", "content": message})
-        total_length = self.calculate_total_length(self.messages)
-        while total_length >= context:
-            self.messages.pop(1)
-            total_length = self.calculate_total_length(self.messages)
+
+        # 简化版上下文窗口管理
+        while self.calculate_total_length(self.messages) >= context:
+            if len(self.messages) > 2:  # 保留 system 和最新的消息
+                self.messages.pop(1)
+            else:
+                break
+
         response = self.client.chat.completions.create(
             model=self.model,
             messages=self.messages
         )
-        content = response.choices[0].message.content
-        global sdk_global_input_token_count
+
+        msg_obj = response.choices[0].message
+        self.last_reasoning = getattr(msg_obj, 'reasoning_content', "")
+        content = msg_obj.content
+
+        global sdk_global_input_token_count, sdk_global_output_token_count
         sdk_global_input_token_count += response.usage.prompt_tokens
-        global sdk_global_output_token_count
         sdk_global_output_token_count += response.usage.completion_tokens
-        self.messages.append({"role": "assistant", "content": content})
+
+        self.messages.append({
+            "role": "assistant",
+            "content": content,
+            "reasoning_content": self.last_reasoning
+        })
         return content
 
     def calculate_message_length(self, message):
-        # enc = tiktoken.encoding_for_model(self.model)
         enc = tiktoken.get_encoding("cl100k_base")
-        return len(enc.encode(message))
+        return len(enc.encode(str(message)))
 
     def calculate_total_length(self, messages):
-        # enc = tiktoken.encoding_for_model(self.model)
         enc = tiktoken.get_encoding("cl100k_base")
         total_length = 0
         for message in messages:
-            total_length += len(enc.encode(message['content']))
+            total_length += len(enc.encode(str(message.get('content', ''))))
+            total_length += len(enc.encode(str(message.get('reasoning_content', ''))))
         return total_length

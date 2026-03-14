@@ -2,16 +2,16 @@ import os
 import logging
 import time # 新增：用于计时
 from datetime import datetime
-from cxxcrafter.log_utils import setup_logging, log_the_dockerfile, log_the_error_message
-from cxxcrafter.generation_module import DockerfileGenerator, DockerfileModifier
-from cxxcrafter.utils import save_successful_dockerfile
-from cxxcrafter.parsing_module import parser
-from cxxcrafter.init import get_log_dir, get_playground_dir, get_solution_base_dir
-from cxxcrafter.llm.bot import get_sdk_token_counts
+from src.cxxcrafter.log_utils import setup_logging, log_the_dockerfile, log_the_error_message
+from src.cxxcrafter.generation_module import DockerfileGenerator, DockerfileModifier
+from src.cxxcrafter.utils import save_successful_dockerfile
+from src.cxxcrafter.parsing_module import parser
+from src.cxxcrafter.init import get_log_dir, get_playground_dir, get_solution_base_dir
+from src.cxxcrafter.llm.bot import get_sdk_token_counts
 
 # 桥接您的构建工具
 from agent_tools import run_fuzz_build_streaming, read_file_content
-from cxxcrafter.execution_module.discriminator import build_success_check_2
+from src.cxxcrafter.execution_module.discriminator import build_success_check_2
 
 class CXXCrafter:
     def __init__(self, project_path, project_info=None, oss_fuzz_root_path=None):
@@ -84,24 +84,39 @@ class CXXCrafter:
         # 第一次生成计为第 1 轮
         self.flag_version += 1
         dockerfile_generator = DockerfileGenerator(
-            self.project_name, self.project_path, 
-            self.environment_requirement, self.potential_dependency, 
+            self.project_name, self.project_path,
+            self.environment_requirement, self.potential_dependency,
             self.docs, project_info=self.project_info)
-        
-        dockerfile_generator.generate_dockerfile()
+
+        # 核心修改：接收返回的思维链内容
+        reasoning = dockerfile_generator.generate_dockerfile()
         self.logger.info('Generation Module Finishes')
 
         self.history_dir = os.path.join(os.path.dirname(self.dockerfile_path), f'history-{self.start_time_str}')
         os.makedirs(self.history_dir, exist_ok=True)
+
+        # 记录 Dockerfile 副本
         log_the_dockerfile(self.dockerfile_path, self.flag_version, self.history_dir)
-    
+
+        # 新增：记录 Reasoner 的思维链到历史目录
+        from src.cxxcrafter.log_utils import log_the_reasoning
+        log_the_reasoning(reasoning, self.flag_version, self.history_dir)
+
     def modify_dockerfile(self, error_message):
         self.logger.info('Modifier Module Starts')
-        # 每次修改计为新的一轮
         self.flag_version += 1
-        self.modifier.modify_dockerfile(self.dockerfile_path, error_message)
+
+        # 核心修改：接收修改过程中的思维链内容
+        reasoning = self.modifier.modify_dockerfile(self.dockerfile_path, error_message)
         self.logger.info('Modifier Module Finishes')
+
+        # 记录修改后的 Dockerfile 副本
         log_the_dockerfile(self.dockerfile_path, self.flag_version, self.history_dir)
+
+        # 新增：记录 Reasoner 的修改思路到历史目录
+        from src.cxxcrafter.log_utils import log_the_reasoning
+        log_the_reasoning(reasoning, self.flag_version, self.history_dir)
+
 
     def execute_dockerfile(self):
         self.logger.info(f'--- [Baseline Round {self.flag_version}] Execution ---')

@@ -40,43 +40,54 @@ def update_yaml_metadata(yaml_path, project_name, result):
 
 def build_one_repo(project_info, yaml_path):
     project_name = project_info['project']
-    repo_base_dir = os.path.join(root_dir, "process", "project")
-    target_repo_path = os.path.join(repo_base_dir, project_name)
-    
-    # 修正点 1：确保 oss-fuzz 目录存在
-    oss_fuzz_repo_path = os.path.join(root_dir, "oss-fuzz") 
+
+    # 1. 确保 oss-fuzz 基础设施目录存在
+    oss_fuzz_repo_path = os.path.join(root_dir, "oss-fuzz")
     if not os.path.exists(oss_fuzz_repo_path):
         print(f"--- [Baseline] oss-fuzz not found. Downloading to {oss_fuzz_repo_path} ---")
         # 使用工具下载 oss-fuzz
         download_github_repo("oss-fuzz", oss_fuzz_repo_path)
 
-    # 锁定版本
+    # 锁定基础设施版本
     print(f"--- [Baseline] Locking OSS-Fuzz SHA: {project_info['oss-fuzz_sha']} ---")
     checkout_oss_fuzz_commit(project_info['oss-fuzz_sha'])
 
+    # 2. 准备第三方软件源码
+    suggested_repo_path = os.path.join(root_dir, "process", "project", project_name)
     print(f"--- [Baseline] Ensuring Source Code for {project_name} ---")
+
+    # 调用下载工具并捕获返回结果
     download_res = download_github_repo(
         project_name=project_name,
-        target_dir=target_repo_path,
+        target_dir=suggested_repo_path,
         repo_url=project_info.get('software_repo_url')
     )
-    
+
     if download_res['status'] == 'error':
+        print(f"❌ [Baseline] Download failed: {download_res.get('message')}")
         update_yaml_metadata(yaml_path, project_name, False)
         return
 
-    print(f"--- [Baseline] Locking Software SHA: {project_info['software_sha']} ---")
-    checkout_project_commit(target_repo_path, project_info['software_sha'])
+    # 【核心修复】：必须使用工具实际返回的 'path'，防止重定向导致找不到目录
+    actual_repo_path = download_res.get('path', suggested_repo_path)
 
+    # 3. 在实际路径中锁定软件版本
+    print(f"--- [Baseline] Locking Software SHA: {project_info['software_sha']} in {actual_repo_path} ---")
+    checkout_project_commit(actual_repo_path, project_info['software_sha'])
+
+    # 4. 启动 CXXCrafter 修复逻辑
     try:
-        # 实例化，显式传入 oss_fuzz_root_path
-        cxxcrafter = CXXCrafter(target_repo_path, project_info=project_info, oss_fuzz_root_path=oss_fuzz_repo_path)
+        # 使用 verified 的 actual_repo_path 实例化
+        cxxcrafter = CXXCrafter(actual_repo_path, project_info=project_info, oss_fuzz_root_path=oss_fuzz_repo_path)
         _, flag_success = cxxcrafter.run()
-        update_yaml_metadata(yaml_path, project_name, flag_success)
-    except Exception as e:
-        print(f"💥 [Baseline] Critical error during execution: {e}")
-        update_yaml_metadata(yaml_path, project_name, False)
 
+        # 更新元数据
+        update_yaml_metadata(yaml_path, project_name, flag_success)
+
+    except Exception as e:
+        # 记录详细错误，防止主循环崩溃
+        print(f"💥 [Baseline] Critical error during execution of {project_name}: {e}")
+        update_yaml_metadata(yaml_path, project_name, False)
 
 def main():
     yaml_path = os.path.join(root_dir, "projects.yaml")
