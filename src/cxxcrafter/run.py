@@ -20,7 +20,7 @@ try:
         checkout_project_commit, 
         download_github_repo
     )
-    from cxxcrafter.cli import CXXCrafter
+    from src.cxxcrafter.cli import CXXCrafter
 except ImportError as e:
     print(f"❌ [Error] Path configuration failed: {e}")
     sys.exit(1)

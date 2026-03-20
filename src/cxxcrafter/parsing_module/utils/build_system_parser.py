@@ -1,5 +1,5 @@
 import os,re
-from cxxcrafter.llm.bot import GPTBot
+from src.cxxcrafter.llm.bot import GPTBot
 import logging
 
 def extract_json_content(text):

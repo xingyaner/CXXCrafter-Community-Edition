@@ -1,4 +1,4 @@
-from cxxcrafter.llm.bot import GPTBot
+from src.cxxcrafter.llm.bot import GPTBot
 from .utils import extract_json_content, remove_ansi_escape_sequences
 import os, logging
 

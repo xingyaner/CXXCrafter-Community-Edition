@@ -1,6 +1,6 @@
 import os,re,sys
 # from qdrant_client import QdrantClient
-from cxxcrafter.llm.bot import GPTBot
+from src.cxxcrafter.llm.bot import GPTBot
 from .utils.build_system_parser import extract_json_content
 
 

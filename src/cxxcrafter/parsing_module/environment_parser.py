@@ -1,5 +1,5 @@
 import os, re
-from cxxcrafter.parsing_module.utils.build_system_parser import order_build_system
+from src.cxxcrafter.parsing_module.utils.build_system_parser import order_build_system
 import platform
 # import psutil
 # import GPUtil

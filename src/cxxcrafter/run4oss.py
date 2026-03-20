@@ -1,6 +1,6 @@
 import os
 import multiprocessing as mp
-from cxxcrafter import cxxcrafter, cxxcrafter_continue
+from src.cxxcrafter import cxxcrafter, cxxcrafter_continue
 
 
 def run_with_one(file_path):

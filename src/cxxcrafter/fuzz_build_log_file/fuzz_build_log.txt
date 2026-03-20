@@ -1,34 +1,31 @@
-INFO:common_utils:Running: docker build -t gcr.io/oss-fuzz/espeak-ng --file /root/BuildFixingBaseline/CXXCrafter-Community-Edition/oss-fuzz/projects/espeak-ng/Dockerfile /root/BuildFixingBaseline/CXXCrafter-Community-Edition/oss-fuzz/projects/espeak-ng.
+INFO:common_utils:Running: docker build -t gcr.io/oss-fuzz/espeak-ng --file /home/senchen/BuildFixingBaseline/CXXCrafter-Community-Edition/oss-fuzz/projects/espeak-ng/Dockerfile /home/senchen/BuildFixingBaseline/CXXCrafter-Community-Edition/oss-fuzz/projects/espeak-ng.
 #0 building with "default" instance using docker driver
-
-#1 [internal] load build definition from Dockerfile
-#1 DONE 0.0s
 
 #1 [internal] load build definition from Dockerfile
 #1 transferring dockerfile: 916B done
 #1 DONE 0.0s
 
 #2 [internal] load metadata for gcr.io/oss-fuzz-base/base-builder:latest
-#2 DONE 1.0s
+#2 DONE 0.7s
 
 #3 [internal] load .dockerignore
 #3 transferring context: 2B done
 #3 DONE 0.0s
 
-#4 [1/5] FROM gcr.io/oss-fuzz-base/base-builder:latest@sha256:5e905cba5765df2374a81aa0437698dac5f0d0304269e2e1e4b9734a93c4c446
+#4 [1/5] FROM gcr.io/oss-fuzz-base/base-builder:latest@sha256:cc6982a6ce8b02c80a2acabbcfe766e5e7200988ff0424b0d4963232c3b41901
 #4 DONE 0.0s
 
 #5 [internal] load build context
 #5 transferring context: 30B done
 #5 DONE 0.0s
 
-#6 [2/5] RUN apt-get update && apt install -y automake autoconf libtool pkg-config
+#6 [3/5] RUN git clone --depth 1 https://github.com/espeak-ng/espeak-ng
 #6 CACHED
 
-#7 [3/5] RUN git clone --depth 1 https://github.com/espeak-ng/espeak-ng
+#7 [4/5] COPY build.sh /src
 #7 CACHED
 
-#8 [4/5] COPY build.sh /src
+#8 [2/5] RUN apt-get update && apt install -y automake autoconf libtool pkg-config
 #8 CACHED
 
 #9 [5/5] WORKDIR /src/espeak-ng
@@ -36,11 +33,11 @@ INFO:common_utils:Running: docker build -t gcr.io/oss-fuzz/espeak-ng --file /roo
 
 #10 exporting to image
 #10 exporting layers done
-#10 writing image sha256:b1caa3f1a3415fc7fa31dc532a73b04ace48f29b922a58005daf8a43992b2e2c done
+#10 writing image sha256:8618dd84361a8b825c7e65052eaf1f8fa769a83275abdaa17d0fc995594e8f77 done
 #10 naming to gcr.io/oss-fuzz/espeak-ng done
 #10 DONE 0.0s
 INFO:__main__:Keeping existing build artifacts as-is (if any).
-INFO:__main__:Running: docker run --privileged --shm-size=2g --platform linux/amd64 --rm -e FUZZING_ENGINE=afl -e SANITIZER=address -e ARCHITECTURE=x86_64 -e PROJECT_NAME=espeak-ng -e HELPER=True -e FUZZING_LANGUAGE=c++ -v /root/BuildFixingBaseline/CXXCrafter-Community-Edition/oss-fuzz/build/out/espeak-ng/:/out -v /root/BuildFixingBaseline/CXXCrafter-Community-Edition/oss-fuzz/build/work/espeak-ng:/work gcr.io/oss-fuzz/espeak-ng.
+INFO:__main__:Running: docker run --privileged --shm-size=2g --platform linux/amd64 --rm -e FUZZING_ENGINE=afl -e SANITIZER=address -e ARCHITECTURE=x86_64 -e PROJECT_NAME=espeak-ng -e HELPER=True -e FUZZING_LANGUAGE=c++ -v /home/senchen/BuildFixingBaseline/CXXCrafter-Community-Edition/oss-fuzz/build/out/espeak-ng/:/out -v /home/senchen/BuildFixingBaseline/CXXCrafter-Community-Edition/oss-fuzz/build/work/espeak-ng:/work gcr.io/oss-fuzz/espeak-ng.
 ---------------------------------------------------------------
 vm.mmap_rnd_bits = 28
 Copying precompiled AFL++

@@ -1,5 +1,5 @@
 import sys
-from cxxcrafter.tools.ccscanner.ccscanner.scanner import scanner
+from src.cxxcrafter.tools.ccscanner.ccscanner.scanner import scanner
 
 
 

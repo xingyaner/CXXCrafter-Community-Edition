@@ -1,14 +1,11 @@
 import os
 
 # === Config ===
-CONFIG_LLM_MODEL = "deepseek-reasoner"
+CONFIG_LLM_MODEL = "deepseek-chat"
 CONFIG_API_KEY = "sk-" # 请填入您的实际 API KEY
 CONFIG_BASE_URL = "https://api.deepseek.com/v1"
 
 MP_POOL_SIZE = 10
-
-
-
 
 
 # === Automaic Check ===

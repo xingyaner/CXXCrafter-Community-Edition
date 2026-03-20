@@ -2,7 +2,7 @@ import os
 import logging
 from .utils import save_dockerfile, extract_dockerfile_content
 from .template.prompt_template import get_initial_prompt
-from cxxcrafter.llm.bot import GPTBot
+from src.cxxcrafter.llm.bot import GPTBot
 
 class DockerfileGenerator:
     def __init__(self, project_name, project_path, environment_requirement, dependency, docs, project_info=None):
@@ -28,7 +28,7 @@ class DockerfileGenerator:
         response = bot.inference(str(prompt_text))
         try:
             dockerfile_content = extract_dockerfile_content(response)
-            from cxxcrafter.init import get_playground_dir
+            from src.cxxcrafter.init import get_playground_dir
             save_path = os.path.join(get_playground_dir(), self.project_name)
             os.makedirs(save_path, exist_ok=True)
             save_dockerfile(save_path, dockerfile_content)

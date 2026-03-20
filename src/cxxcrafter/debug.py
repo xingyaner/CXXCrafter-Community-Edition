@@ -1,7 +1,7 @@
 import os
-from cxxcrafter import CXXCrafter
-from cxxcrafter.execution_module.docker_manager import build_docker_image_by_api
-from cxxcrafter.execution_module import executor
+from src.cxxcrafter import CXXCrafter
+from src.cxxcrafter.execution_module.docker_manager import build_docker_image_by_api
+from src.cxxcrafter.execution_module import executor
 from log_utils import setup_logging
 
 def debug_one_project(repo_path):

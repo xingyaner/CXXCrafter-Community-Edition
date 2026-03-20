@@ -2,8 +2,8 @@ import os
 import multiprocessing as mp
 import argparse
 
-from cxxcrafter import CXXCrafter
-from cxxcrafter.config import MP_POOL_SIZE
+from src.cxxcrafter import CXXCrafter
+from src.cxxcrafter.config import MP_POOL_SIZE
 
 
 def run_with_file_list(file_path):
