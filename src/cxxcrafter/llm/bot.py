@@ -17,10 +17,16 @@ def get_sdk_token_counts():
     return GPTBot.sdk_input_tokens, GPTBot.sdk_output_tokens
 
 
+def get_sdk_usage_event_count():
+    """Return the number of API responses that reported token usage."""
+    return GPTBot.sdk_usage_events
+
+
 class GPTBot:
     # --- 核心统计变量：绑定在类上，防止多模块加载导致的变量隔离 ---
     sdk_input_tokens = 0
     sdk_output_tokens = 0
+    sdk_usage_events = 0
 
     def __init__(self, system_prompt=None):
         content = system_prompt if system_prompt is not None else "You are a premier expert in software building."
@@ -65,6 +71,7 @@ class GPTBot:
                 if hasattr(response, 'usage') and response.usage:
                     GPTBot.sdk_input_tokens += response.usage.prompt_tokens
                     GPTBot.sdk_output_tokens += response.usage.completion_tokens
+                    GPTBot.sdk_usage_events += 1
 
                 self.messages.append({
                     "role": "assistant",

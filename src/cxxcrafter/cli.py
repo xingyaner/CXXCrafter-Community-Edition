@@ -2,6 +2,8 @@ import os
 import logging
 import time
 import sys
+import difflib
+import shutil
 from datetime import datetime
 
 # --- 关键：统一导入路径，移除 src. 前缀 ---
@@ -12,8 +14,11 @@ from src.cxxcrafter.log_utils import (
 from src.cxxcrafter.generation_module import DockerfileGenerator, DockerfileModifier
 from src.cxxcrafter.utils import save_successful_dockerfile
 from src.cxxcrafter.parsing_module import parser
-from src.cxxcrafter.init import get_log_dir, get_playground_dir, get_solution_base_dir
-from src.cxxcrafter.llm.bot import get_sdk_token_counts
+from src.cxxcrafter.init import (
+    get_log_dir, get_playground_dir, get_solution_base_dir,
+    get_project_archive_dir, get_success_archive_dir
+)
+from src.cxxcrafter.llm.bot import get_sdk_token_counts, get_sdk_usage_event_count
 from agent_tools import run_fuzz_build_and_validate, read_file_content
 
 
@@ -23,15 +28,20 @@ class CXXCrafter:
         self.project_info = project_info
         self.oss_fuzz_root_path = oss_fuzz_root_path
 
-        self.start_wall_time = time.time()
+        self.start_monotonic_time = time.monotonic()
         self.start_in_tokens, self.start_out_tokens = get_sdk_token_counts()
+        self.start_usage_events = get_sdk_usage_event_count()
 
-        self.start_time_str = datetime.now().strftime('%Y%m%d_%H%M')
+        self.start_time_str = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.project_name = os.path.basename(project_path)
         self.dockerfile_path = os.path.join(get_playground_dir(), self.project_name, 'Dockerfile')
-        self.log_file = f"{get_log_dir()}/{self.project_name}_{self.start_time_str}.log"
+        self.log_file = os.path.join(
+            get_log_dir(), f"{self.project_name}_log_{self.start_time_str}.txt"
+        )
         self.history_dir = None
         self.flag_version = 0
+        self.initial_dockerfile_content = ""
+        self.report_path = None
         self.modifier = DockerfileModifier()
 
         # 1. 启动标准日志配置
@@ -46,43 +56,109 @@ class CXXCrafter:
         sys.stderr = LoggerWriter(self.logger, logging.ERROR)
 
 
-    def _calculate_lines_modified(self):
-        """统计最终生成的 Dockerfile 行数作为修改行数"""
-        if os.path.exists(self.dockerfile_path):
-            try:
-                with open(self.dockerfile_path, 'r', encoding='utf-8') as f:
-                    return len(f.readlines())
-            except Exception:
-                return 0
-        return 0
+    def _calculate_change_statistics(self):
+        """Compare the initial and final Dockerfiles for report statistics."""
+        if not self.initial_dockerfile_content or not os.path.exists(self.dockerfile_path):
+            return 0, 0
 
-    def print_final_report(self, is_success):
-        end_time = time.time()
+        try:
+            with open(self.dockerfile_path, 'r', encoding='utf-8') as f:
+                final_content = f.read()
+        except OSError:
+            return 0, 0
+
+        if final_content == self.initial_dockerfile_content:
+            return 0, 0
+
+        changed_lines = 0
+        initial_lines = self.initial_dockerfile_content.splitlines()
+        final_lines = final_content.splitlines()
+        for tag, start_a, end_a, start_b, end_b in difflib.SequenceMatcher(
+            None, initial_lines, final_lines
+        ).get_opcodes():
+            if tag != 'equal':
+                changed_lines += max(end_a - start_a, end_b - start_b)
+        return 1, changed_lines
+
+    def _build_final_report(self, is_success):
+        """Build one report body for both the log and the per-project file."""
         end_in_tokens, end_out_tokens = get_sdk_token_counts()
-
-        duration_min = (end_time - self.start_wall_time) / 60
-        total_tokens = (end_in_tokens - self.start_in_tokens) + (end_out_tokens - self.start_out_tokens)
-        lines_modified = self._calculate_lines_modified()
-
+        end_usage_events = get_sdk_usage_event_count()
+        input_tokens = max(0, end_in_tokens - self.start_in_tokens)
+        output_tokens = max(0, end_out_tokens - self.start_out_tokens)
+        usage_events = max(0, end_usage_events - self.start_usage_events)
+        duration_min = (time.monotonic() - self.start_monotonic_time) / 60
+        files_changed, lines_changed = self._calculate_change_statistics()
         result_icon = "✅ SUCCESS" if is_success else "❌ FAILURE"
         fix_result = "Success" if is_success else "Failure"
+        error_time = (self.project_info or {}).get('error_time', 'N/A')
+        input_tokens_text = str(input_tokens) if usage_events else "N/A (provider did not report usage)"
+        output_tokens_text = str(output_tokens) if usage_events else "N/A (provider did not report usage)"
 
         report = (
-            f"\n{'=' * 60}\n"
-            f"🏁 FINAL BASELINE REPORT: {self.project_name}\n"
-            f"[RESULT]           {result_icon}\n"
-            f"[METADATA STATE]   yes (processed)\n"
-            f"[FIX RESULT]       {fix_result}\n"
-            f"[DISCUSSION]       NO\n"
-            f"[REPAIR ROUNDS]    {self.flag_version}\n"
-            f"[TOKEN USAGE]      {total_tokens}\n"
-            f"[FILES MODIFIED]   {1 if lines_modified > 0 else 0}\n"
-            f"[LINES MODIFIED]   {lines_modified}\n"
-            f"[TIME COST]        {duration_min:.2f} minutes\n"
+            f"{'=' * 60}\n"
+            f"🏁 FINAL PROJECT REPAIR REPORT: {self.project_name}\n"
+            f"{'-' * 60}\n"
+            f"  - [Error Time]: {error_time}\n"
+            f"  - [Result]: {result_icon}\n"
+            f"  - [Metadata State]: yes (processed)\n"
+            f"  - [Fix Result]: {fix_result}\n"
+            f"  - [Repair Rounds]: {self.flag_version} (initial generation included)\n"
+            f"  - [Time Cost]: {duration_min:.2f} minutes\n"
+            f"  - [Input Tokens]: {input_tokens_text}\n"
+            f"  - [Output Tokens]: {output_tokens_text}\n"
+            f"  - [Files Change]: {files_changed}\n"
+            f"  - [Lines Change]: {lines_changed}\n"
             f"{'=' * 60}\n"
         )
-        # 此时的 print 会自动进入日志
-        print(report)
+        return report
+
+    def _archive_repair_patch(self):
+        """Archive the Dockerfile diff, including an explicit empty-patch record."""
+        archive_dir = get_project_archive_dir(self.project_name)
+        patch_dir = os.path.join(archive_dir, "patch")
+        os.makedirs(patch_dir, exist_ok=True)
+        patch_path = os.path.join(
+            patch_dir, f"{self.project_name}_fix_{self.start_time_str}.patch"
+        )
+
+        final_content = ""
+        if os.path.exists(self.dockerfile_path):
+            with open(self.dockerfile_path, 'r', encoding='utf-8') as f:
+                final_content = f.read()
+
+        if self.initial_dockerfile_content:
+            patch = ''.join(difflib.unified_diff(
+                self.initial_dockerfile_content.splitlines(keepends=True),
+                final_content.splitlines(keepends=True),
+                fromfile='Dockerfile.initial', tofile='Dockerfile.final'
+            ))
+        else:
+            patch = "# No Dockerfile was generated; no patch is available.\n"
+
+        with open(patch_path, 'w', encoding='utf-8') as f:
+            f.write(patch or "# No Dockerfile changes were made.\n")
+        return patch_path
+
+    def _write_project_repair_report(self, report, is_success):
+        archive_dir = get_project_archive_dir(self.project_name)
+        result_dir = os.path.join(archive_dir, "repair_result")
+        os.makedirs(result_dir, exist_ok=True)
+        filename = f"{self.project_name}_fix_result_{self.start_time_str}.txt"
+        report_path = os.path.join(result_dir, filename)
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(report)
+        if is_success:
+            shutil.copyfile(report_path, os.path.join(get_success_archive_dir(), filename))
+        self.report_path = report_path
+        return report_path
+
+    def print_final_report(self, is_success):
+        report = self._build_final_report(is_success)
+        patch_path = self._archive_repair_patch()
+        report_path = self._write_project_repair_report(report, is_success)
+        # print is redirected to the project log while CXXCrafter is running.
+        print(f"\n{report}Saved patch: {patch_path}\nSaved report: {report_path}")
 
     def parse_project(self):
         self.logger.info('Parsing Module Starts')
@@ -107,6 +183,8 @@ class CXXCrafter:
 
         log_the_dockerfile(self.dockerfile_path, self.flag_version, self.history_dir)
         log_the_reasoning(reasoning, self.flag_version, self.history_dir)
+        with open(self.dockerfile_path, 'r', encoding='utf-8') as f:
+            self.initial_dockerfile_content = f.read()
 
     def modify_dockerfile(self, error_message):
         self.logger.info('Modifier Module Starts')

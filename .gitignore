@@ -19,3 +19,5 @@ logs*/
 .cxxcrafter/
 fuzz_build_log_file/
 process/
+log/
+archive/

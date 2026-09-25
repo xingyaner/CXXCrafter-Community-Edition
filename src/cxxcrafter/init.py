@@ -20,8 +20,12 @@ def get_base_dir() -> str:
     base_path = os.path.join(project_root, ".cxxcrafter")
     return _ensure_dir(base_path)
 
+
+def get_project_root() -> str:
+    return os.path.dirname(get_base_dir())
+
 def get_log_dir() -> str:
-    return _ensure_dir(os.path.join(get_base_dir(), "logs"))
+    return _ensure_dir(os.path.join(get_project_root(), "log"))
 
 def get_playground_dir() -> str:
     return _ensure_dir(os.path.join(get_base_dir(), "dockerfile_playground"))
@@ -29,8 +33,20 @@ def get_playground_dir() -> str:
 def get_solution_base_dir() -> str:
     return _ensure_dir(os.path.join(get_base_dir(), "build_solution_base"))
 
+def get_archive_dir() -> str:
+    return _ensure_dir(os.path.join(get_project_root(), "archive"))
+
+
+def get_project_archive_dir(project_name: str) -> str:
+    return _ensure_dir(os.path.join(get_archive_dir(), project_name))
+
+
+def get_success_archive_dir() -> str:
+    return _ensure_dir(os.path.join(get_archive_dir(), "成功修复"))
+
 def ensure_all_directories_exist():
     """初始化所有必需的子目录"""
     get_log_dir()
     get_playground_dir()
     get_solution_base_dir()
+    get_archive_dir()
