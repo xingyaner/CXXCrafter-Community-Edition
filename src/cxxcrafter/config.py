@@ -1,8 +1,8 @@
 import os
 
 # === Config ===
-CONFIG_LLM_MODEL = "deepseek-chat"
-CONFIG_API_KEY = "sk-" # 请填入您的实际 API KEY
+CONFIG_LLM_MODEL = "deepseek-v4-flash"
+CONFIG_API_KEY = "" # 请通过对应供应商的环境变量配置 API KEY
 CONFIG_BASE_URL = "https://api.deepseek.com/v1"
 
 MP_POOL_SIZE = 10

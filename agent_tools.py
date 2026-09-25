@@ -8,7 +8,8 @@ import shutil
 import requests
 import subprocess
 import yaml
-from datetime import datetime, time
+import time
+from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 
 # 仅保留物理环境相关的路径常量
@@ -184,6 +185,36 @@ def _auto_discover_project_symbols(binary_path: str, project_name: str) -> Optio
         return None
 
 
+def _is_elf_binary(file_path: str) -> bool:
+    """Return whether *file_path* is a Linux executable binary.
+
+    OSS-Fuzz also copies seed-corpus inputs to /out.  Their permissions can
+    retain an executable bit, so permissions alone cannot identify a fuzzer.
+    """
+    try:
+        with open(file_path, "rb") as file_obj:
+            return file_obj.read(4) == b"\x7fELF"
+    except OSError:
+        return False
+
+
+def _find_fuzz_targets(out_dir: str) -> List[str]:
+    """Find fuzzing executables in an OSS-Fuzz output directory.
+
+    Prefer conventionally named fuzzer binaries, then retain other ELF
+    executables for projects that use a different target naming scheme.
+    """
+    ignored_prefixes = ('afl-', 'llvm-', 'jazzer')
+    targets = []
+    for entry in os.scandir(out_dir):
+        if not entry.is_file() or entry.name.startswith(ignored_prefixes):
+            continue
+        if _is_elf_binary(entry.path):
+            targets.append(entry.name)
+
+    return sorted(targets, key=lambda name: ('fuzzer' not in name.lower(), name))
+
+
 def _cleanup_environment(oss_fuzz_path: str, project_name: str):
     """环境净化机制：清理残留容器并释放文件句柄"""
     print(f"[*] Pre-build cleanup for project: {project_name}")
@@ -290,14 +321,7 @@ def run_fuzz_build_and_validate(
         if is_build_ok:
             logger.info(f"--- [Phase 2] Starting Deep Validation for {project_name} ---")
             out_dir = os.path.join(oss_fuzz_path, "build", "out", project_name)
-            targets = []
-            if os.path.exists(out_dir):
-                ignore_ext = ('.so', '.a', '.jar', '.class', '.zip', '.dict', '.options')
-                for f in os.listdir(out_dir):
-                    f_path = os.path.join(out_dir, f)
-                    if os.path.isfile(f_path) and os.access(f_path, os.X_OK):
-                        if not f.startswith(('afl-', 'llvm-', 'jazzer')) and not f.endswith(ignore_ext):
-                            targets.append(f)
+            targets = _find_fuzz_targets(out_dir) if os.path.isdir(out_dir) else []
 
             if not targets:
                 is_build_ok = False
@@ -305,7 +329,6 @@ def run_fuzz_build_and_validate(
                 logger.error("[Step 1] FAILED: No executable fuzz targets found in /out.")
             else:
                 target = targets[0]
-                primary_path = os.path.join(out_dir, target)
                 report["step_1_static_output"] = {"status": "pass", "details": f"Target: {target}"}
                 logger.info(f"[Step 1] PASSED: Found target binary: {target}")
 
@@ -353,7 +376,7 @@ def run_fuzz_build_and_validate(
                         if not fuzzer_started:
                             if any(m in line for m in ["INFO:", "[*] ", "fuzz target", "Entering main"]):
                                 fuzzer_started = True
-                                start_run_time = time.time()
+                                start_run_time = time.monotonic()
                                 logger.info("[+] Fuzzer process successfully started.")
 
                         # 检查执行速率
@@ -362,7 +385,7 @@ def run_fuzz_build_and_validate(
                             print(f"  [Activity Detected] {line.strip()}")
 
                         if fuzzer_started and start_run_time:
-                            if time.time() - start_run_time > 45:  # 给予一定宽限时间
+                            if time.monotonic() - start_run_time > 45:  # 给予一定宽限时间
                                 logger.info("[!] Stability test time limit reached.")
                                 break
                 except Exception as e:

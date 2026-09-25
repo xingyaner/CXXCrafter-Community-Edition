@@ -69,17 +69,26 @@ class DockerfileModifier:
         with open(dockerfile_path, 'r', encoding='utf-8') as f:
             last_content = f.read()
 
-        # 3. 组装 Prompt（注入日志）
+        # 3. Each retry receives the current Dockerfile and the latest build
+        # log, so retaining all preceding turns only grows the API request and
+        # can cause a later modifier round to stall or exceed context limits.
+        self.bot.reset_conversation()
+
+        # 4. 组装 Prompt（注入日志）
         prompt = prompt_template_for_modification.format(
             log_tail=log_tail,
             last_dockerfile_content=last_content,
             feedback_message=error_message
         )
 
-        # 4. 执行推理
-        response = self.bot.inference(str(prompt))
+        # 5. 执行推理
+        try:
+            response = self.bot.inference(str(prompt))
+        except Exception as e:
+            self.logger.exception("Modifier LLM request failed.")
+            raise RuntimeError(f"Modifier LLM request failed: {e}") from e
 
-        # 5. 提取并保存
+        # 6. 提取并保存
         try:
             new_content = extract_dockerfile_content(response)
             resave_dockerfile(dockerfile_path, new_content)

@@ -65,11 +65,14 @@ class CXXCrafter:
         lines_modified = self._calculate_lines_modified()
 
         result_icon = "✅ SUCCESS" if is_success else "❌ FAILURE"
+        fix_result = "Success" if is_success else "Failure"
 
         report = (
             f"\n{'=' * 60}\n"
             f"🏁 FINAL BASELINE REPORT: {self.project_name}\n"
             f"[RESULT]           {result_icon}\n"
+            f"[METADATA STATE]   yes (processed)\n"
+            f"[FIX RESULT]       {fix_result}\n"
             f"[DISCUSSION]       NO\n"
             f"[REPAIR ROUNDS]    {self.flag_version}\n"
             f"[TOKEN USAGE]      {total_tokens}\n"

@@ -30,8 +30,11 @@ def update_yaml_metadata(yaml_path, project_name, result):
         data = yaml.safe_load(f)
     for entry in data:
         if entry.get('project') == project_name:
-            entry['fixed_state'] = 'yes'
-            entry['fix_result'] = 'Success' if result else 'Fail'
+            # `state` records whether this metadata entry has been handled;
+            # it is independent from the repair result.  Keep the legacy
+            # `fixed_state` field unchanged for compatibility.
+            entry['state'] = 'yes'
+            entry['fix_result'] = 'Success' if result else 'Failure'
             entry['fix_date'] = datetime.now().strftime('%Y-%m-%d')
             break
     with open(yaml_path, 'w', encoding='utf-8') as f:
@@ -96,7 +99,9 @@ def main():
     with open(yaml_path, 'r', encoding='utf-8') as f:
         projects = yaml.safe_load(f)
     for entry in projects:
-        if entry.get('fixed_state', 'no') == 'no':
+        # `state: 'no'` (or absent state in legacy metadata) means this
+        # entry has not yet been processed.
+        if entry.get('state', 'no') == 'no':
             print(f"\n{'='*60}\n🛠️ [Baseline] Processing: {entry['project']}\n{'='*60}")
             build_one_repo(entry, yaml_path)
 

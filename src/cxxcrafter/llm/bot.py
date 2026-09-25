@@ -36,6 +36,11 @@ class GPTBot:
             if isinstance(msg, dict) and msg.get("role") == "assistant" and "reasoning_content" in msg:
                 del msg["reasoning_content"]
 
+    def reset_conversation(self):
+        """Discard prior repair turns before composing an independent retry."""
+        self.messages = self.messages[:1]
+        self.last_reasoning = ""
+
     def inference(self, message=''):
         self._clear_history_reasoning()
         self.messages.append({"role": "user", "content": message})
@@ -43,6 +48,10 @@ class GPTBot:
         max_retries = 3
         for attempt in range(max_retries):
             try:
+                self.logger.info(
+                    "LLM request started (attempt %d/%d, messages=%d).",
+                    attempt + 1, max_retries, len(self.messages)
+                )
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=self.messages,
@@ -65,6 +74,7 @@ class GPTBot:
 
                 if self.last_reasoning:
                     self.logger.info(f"--- [REASONER THOUGHTS] ---\n{self.last_reasoning[:500]}...\n")
+                self.logger.info("LLM request completed (attempt %d/%d).", attempt + 1, max_retries)
                 return content
 
             except Exception as e:
